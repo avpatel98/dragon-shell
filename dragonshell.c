@@ -7,6 +7,38 @@
 #define TOKEN_MAX_NUM     100
 #define PATH_MAX_SIZE     200
 
+int is_background_command(char *cmd_str)
+{
+	size_t cmd_len = strlen(cmd_str);
+	
+	while (cmd_len > 0)
+	{
+		if ((cmd_str[cmd_len - 1] == ' ') || (cmd_str[cmd_len - 1] == '\t'))
+		{
+			cmd_len--;
+		}
+		else
+		{
+			if (cmd_str[cmd_len - 1] == '&')
+			{
+				return 1;
+			}
+			cmd_len = 0;
+		}
+	}
+	
+	return 0;
+}
+
+int search_command(char *cmd_str, int chr)
+{
+	if (strchr(cmd_str, chr) == NULL)
+	{
+		return 0;
+	}
+	return 1;
+}
+
 /**
  * @brief Tokenize a C string 
  * 
@@ -15,15 +47,17 @@
  * @param argv - A char* array that will contain the tokenized strings
  * Make sure that you allocate enough space for the array.
  */
-void tokenize(char *str, const char *delim, char **argv)
+size_t tokenize(char *str, const char *delim, char **argv)
 {
     char *token;
     token = strtok(str, delim);
-    for (size_t i = 0; token != NULL; ++i)
+    size_t i = 0;
+    for (i = 0; token != NULL; ++i)
     {
-        argv[i] = token;
+    	argv[i] = token;
         token = strtok(NULL, delim);
     }
+    return i;
 }
 
 int main(int argc, char **argv)
@@ -35,8 +69,6 @@ int main(int argc, char **argv)
     char input_str[INPUT_MAX_SIZE];
     char *cmd_list[TOKEN_MAX_NUM];
     char *cmd_param[TOKEN_MAX_NUM];
-    char curr_path[PATH_MAX_SIZE] = "/bin/:/usr/bin/";
-    size_t input_len = 0;
     
     printf("Welcome to Dragon Shell!\n");
     
@@ -45,8 +77,8 @@ int main(int argc, char **argv)
         printf("dragonshell > ");
         
         if (fgets(input_str, INPUT_MAX_SIZE, stdin) != NULL) 
-        {
-            input_len = strlen(input_str);
+        {             
+            size_t input_len = strlen(input_str);
             if (input_len > 1)
             {
                 if (input_str[input_len - 1] == '\n')
@@ -54,19 +86,27 @@ int main(int argc, char **argv)
                     input_str[input_len - 1] = '\0';
                 }
             }
-                
-            tokenize(cmd, ';', cmd_list);
+        	
+        	size_t cmd_num = tokenize(input_str, ";", cmd_list);
             
-            for (size_t i = 0; i < TKN_MAX_NUM; i++)
-            {
-                if (cmd_list[i] != NULL)
+            for (size_t i = 0; i < cmd_num; i++)
+            {          	
+            	printf("%s\n", cmd_list[i]);
+            	
+            	char *cmd_str = cmd_list[i];
+                
+            	if (cmd_str != NULL)
                 {
-                    if (strncmp(cmd_list[0], "$PATH",              
+            		int background_flag = is_background_command(cmd_str);                   
+                    int redirection_flag = search_command(cmd_str, '>');
+                    int pipe_flag = search_command(cmd_str, '|');
+                    
+                    printf("%d %d %d\n", background_flag, redirection_flag, pipe_flag);
+                    
+                    size_t param_num = tokenize(cmd_str, " \t", cmd_param);
+                    
+                    
                 }
-                else
-                {
-                    break;
-                }    
             }
         }
     }

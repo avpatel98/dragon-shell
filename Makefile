@@ -9,7 +9,7 @@ clean:
 	rm *.o dragonshell
 
 dragonshell.o: dragonshell.c
-	$(CC) $(CFLAGS) -c dragonshell.c -o dragonshell.o
+	$(CC) $(CFLAGS) -c dragonshell.c -o dragonshell.o -g
 
 dragonshell: dragonshell.o
 	$(CC) $(CFLAGS) -o dragonshell dragonshell.o
