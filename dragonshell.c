@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <unistd.h>
 #include <string.h>
 #include <stdio.h>
@@ -13,7 +14,8 @@
 char curr_path[PATH_MAX_NUM][PATH_MAX_SIZE];
 size_t curr_path_num = 0;
 
-int background_cpid = -1;
+pid_t background_cpid = -1;
+pid_t foreground_cpid = -1;
 
 /**
  * @brief Tokenize a C string 
@@ -32,6 +34,18 @@ void tokenize(char *str, const char *delim, char **argv)
 		argv[i] = token;
 		token = strtok(NULL, delim);
     }
+}
+
+void signal_forward_handler(int signum)
+{
+	if (background_cpid > 0)
+	{
+		kill(background_cpid, signum);
+	}
+	if (foreground_cpid > 0)
+	{
+		kill(foreground_cpid, signum);
+	}
 }
 
 int is_background_command(char *cmd_str)
@@ -114,13 +128,13 @@ void execute_a2path_command(char **cmd_param)
 	}
 	else 
 	{
-		char *directories[PATH_MAX_NUM] = {NULL};
-		tokenize(cmd_param[1], ":", directories);
+		char *direct_paths[PATH_MAX_NUM] = {NULL};
+		tokenize(cmd_param[1], ":", direct_paths);
 		
 		size_t direct_ind = 0;
-		if (directories[0] != NULL)
+		if (direct_paths[0] != NULL)
 		{
-			if (strcmp(directories[0], "$PATH") == 0)
+			if (strcmp(direct_paths[0], "$PATH") == 0)
 			{
 				direct_ind = 1;
 			}
@@ -130,9 +144,9 @@ void execute_a2path_command(char **cmd_param)
 			}
 		}
 		
-		while (directories[direct_ind] != NULL)
+		while (direct_paths[direct_ind] != NULL)
 		{
-			strcpy(curr_path[curr_path_num++], directories[direct_ind++]);
+			strcpy(curr_path[curr_path_num++], direct_paths[direct_ind++]);
 		}
 	}
 }
@@ -140,7 +154,43 @@ void execute_a2path_command(char **cmd_param)
 void execute_exit_command(void)
 {
 	printf("Exiting\n");
+	
+	if (background_cpid > 0)
+	{
+		kill(background_cpid, SIGKILL);
+	}
+	
+	while (wait(NULL) > 0);
+	
 	_exit(0);
+}
+
+void execute_command(char **cmd_param)
+{
+	char *env[] = {NULL};
+	
+	if (strncmp(cmd_param[0], "/", 1) == 0)
+	{
+		execve(cmd_param[0], cmd_param, env);
+	}
+	else
+	{
+		char direct_path[PATH_MAX_SIZE];
+		
+		if (getcwd(direct_path, PATH_MAX_SIZE) != NULL)
+		{		
+			strcat(direct_path, "/");
+			strcat(direct_path, cmd_param[0]);
+			execve(direct_path, cmd_param, env);
+		}
+		
+		for (size_t direct_ind = 0; direct_ind < curr_path_num; direct_ind++)
+		{	
+			strcpy(direct_path, curr_path[direct_ind]);
+			strcat(direct_path, cmd_param[0]);
+			execve(direct_path, cmd_param, env);
+		}
+	}
 }
 
 int main(int argc, char **argv)
@@ -149,7 +199,10 @@ int main(int argc, char **argv)
     // tokenize the input, run the command(s), and print the result
     // do this in a loop
     
-    char input_str[INPUT_MAX_SIZE];  
+    char input_str[INPUT_MAX_SIZE];
+    
+    signal(SIGINT, signal_forward_handler);
+    signal(SIGTSTP, signal_forward_handler);
     
     printf("Welcome to Dragon Shell!\n");
     
@@ -165,11 +218,18 @@ int main(int argc, char **argv)
         if (fgets(input_str, INPUT_MAX_SIZE, stdin) != NULL) 
         {             
             size_t input_len = strlen(input_str);
-            if (input_len > 1)
+            if (input_len > 0)
             {
                 if (input_str[input_len - 1] == '\n')
                 {
-                    input_str[input_len - 1] = '\0';
+                    if (input_len == 1)
+                    {
+                    	continue;
+                    }
+                    else
+                    {
+                    	input_str[input_len - 1] = '\0';
+                    }
                 }
             }
         	
@@ -178,19 +238,15 @@ int main(int argc, char **argv)
         	
         	size_t cmd_ind = 0;
             while (cmd_list[cmd_ind] != NULL)
-            { 
-				printf("%s\n", cmd_list[cmd_ind]);
-					
+            {
 				char *cmd_str = cmd_list[cmd_ind++];
 					
-				int background_flag = is_background_command(cmd_str);                   
-				int redirection_flag = search_command(cmd_str, '>');
-				int pipe_flag = search_command(cmd_str, '|');
-				
-				printf("%d %d %d\n", background_flag, redirection_flag, pipe_flag);
+				int background_flag = is_background_command(cmd_str);  
+				//int redirection_flag = search_command(cmd_str, '>');
+				//int pipe_flag = search_command(cmd_str, '|');
 				
 				char *cmd_param[TOKEN_MAX_NUM] = {NULL};
-				tokenize(cmd_str, " \t", cmd_param);
+				tokenize(cmd_str, " \t&", cmd_param);
 				
 				if (cmd_param[0] != NULL)
 				{
@@ -218,13 +274,26 @@ int main(int argc, char **argv)
 					{
 						pid_t pid = fork();
 						
-						if (pid < 0)
+						if (pid == -1)
 						{
 							perror("fork");
 						}
 						else if (pid == 0)
 						{
+							signal(SIGINT, SIG_DFL);
+							signal(SIGTSTP, SIG_DFL);
 							
+							if (background_flag)
+							{
+								close(STDOUT_FILENO);
+								close(STDERR_FILENO);
+							}
+							
+							execute_command(cmd_param);
+							
+							printf("dragonshell: %s: command not found\n", cmd_param[0]);
+							
+							return 1;
 						}
 						else
 						{
@@ -235,7 +304,8 @@ int main(int argc, char **argv)
 							}
 							else
 							{
-								waitpid(pid, NULL, 0);
+								foreground_cpid = pid;
+								waitpid(foreground_cpid, NULL, 0);
 							}
 						}
 					}

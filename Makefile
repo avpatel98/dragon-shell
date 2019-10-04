@@ -1,15 +1,18 @@
 CC	= gcc
 CFLAGS	= -Wall -O2
 
-.PHONY: all clean
+.PHONY: all clean compile compress
 
 all: dragonshell
 
 clean:
 	rm *.o dragonshell
 
-dragonshell.o: dragonshell.c
+compile: dragonshell.c
 	$(CC) $(CFLAGS) -c dragonshell.c -o dragonshell.o -g
 
 dragonshell: dragonshell.o
 	$(CC) $(CFLAGS) -o dragonshell dragonshell.o
+	
+compress:
+	zip dragonshell.zip dragonshell.c Makefile README.md
