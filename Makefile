@@ -9,7 +9,7 @@ clean:
 	rm *.o dragonshell
 
 compile: dragonshell.c
-	$(CC) $(CFLAGS) -c dragonshell.c -o dragonshell.o -g
+	$(CC) $(CFLAGS) -c dragonshell.c -o dragonshell.o
 
 dragonshell: dragonshell.o
 	$(CC) $(CFLAGS) -o dragonshell dragonshell.o
