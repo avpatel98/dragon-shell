@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <unistd.h>
 #include <string.h>
@@ -62,6 +63,7 @@ int is_background_command(char *cmd_str)
 		{
 			if (cmd_str[cmd_len - 1] == '&')
 			{
+				cmd_str[cmd_len - 1] = '\0';
 				return 1;
 			}
 			cmd_len = 0;
@@ -102,7 +104,7 @@ void execute_pwd_command(char **cmd_param)
 	}
 	else
 	{
-		perror("getcwd");
+		perror("getcwd error");
 	}
 }
 
@@ -163,6 +165,28 @@ void execute_exit_command(void)
 	while (wait(NULL) > 0);
 	
 	_exit(0);
+}
+
+void initiate_redirection(char *cmd_str)
+{
+	char *redirect_param[5] = {NULL};
+	tokenize(cmd_str, ">", redirect_param);
+	cmd_str = redirect_param[0];
+	
+	if (redirect_param[1] != NULL)
+	{
+		char *file_name[5] = {NULL};
+		tokenize(redirect_param[1], " \t", file_name);
+		
+		int file_desc = open(file_name[0], O_CREAT | O_TRUNC | O_WRONLY, S_IRUSR | S_IWUSR);
+		if (file_desc == -1)
+		{
+			perror("open error");
+		}
+		
+		dup2(file_desc, STDOUT_FILENO);
+		close(file_desc);
+	}
 }
 
 void execute_command(char **cmd_param)
@@ -241,74 +265,151 @@ int main(int argc, char **argv)
             {
 				char *cmd_str = cmd_list[cmd_ind++];
 					
-				int background_flag = is_background_command(cmd_str);  
-				//int redirection_flag = search_command(cmd_str, '>');
-				//int pipe_flag = search_command(cmd_str, '|');
+				int background_flag = is_background_command(cmd_str);
+				int pipe_flag = search_command(cmd_str, '|');
 				
 				char *cmd_param[TOKEN_MAX_NUM] = {NULL};
-				tokenize(cmd_str, " \t&", cmd_param);
 				
-				if (cmd_param[0] != NULL)
+				char *pipe_param[5] = {NULL};
+				if (pipe_flag)
 				{
-					if (strcmp(cmd_param[0], "cd") == 0)
+					tokenize(cmd_str, "|", pipe_param);
+					cmd_str = pipe_param[0];
+				}
+				
+				int redirect_flag = search_command(cmd_str, '>');
+				int stdout_desc = dup(STDOUT_FILENO);
+				
+				if (redirect_flag)
+				{
+					initiate_redirection(cmd_str);
+				}
+				
+				tokenize(cmd_str, " \t", cmd_param);
+				
+				if (strcmp(cmd_param[0], "cd") == 0)
+				{
+					execute_cd_command(cmd_param);
+				}
+				else if (strcmp(cmd_param[0], "pwd") == 0)
+				{
+					execute_pwd_command(cmd_param);
+				}
+				else if (strcmp(cmd_param[0], "$PATH") == 0)
+				{
+					execute_print_path_command();
+				}
+				else if (strcmp(cmd_param[0], "a2path") == 0)
+				{
+					execute_a2path_command(cmd_param);
+				}
+				else if (strcmp(cmd_param[0], "exit") == 0)
+				{
+					execute_exit_command();
+				}
+				else
+				{
+					pid_t pid = fork();
+					if (pid == -1)
 					{
-						execute_cd_command(cmd_param);
+						perror("fork error");
 					}
-					else if (strcmp(cmd_param[0], "pwd") == 0)
+					else if (pid == 0)
 					{
-						execute_pwd_command(cmd_param);
-					}
-					else if (strcmp(cmd_param[0], "$PATH") == 0)
-					{
-						execute_print_path_command();
-					}
-					else if (strcmp(cmd_param[0], "a2path") == 0)
-					{
-						execute_a2path_command(cmd_param);
-					}
-					else if (strcmp(cmd_param[0], "exit") == 0)
-					{
-						execute_exit_command();
-					}
-					else
-					{
-						pid_t pid = fork();
+						signal(SIGINT, SIG_DFL);
+						signal(SIGTSTP, SIG_DFL);
 						
-						if (pid == -1)
+						if (background_flag)
 						{
-							perror("fork");
+							close(STDOUT_FILENO);
+							close(STDERR_FILENO);
 						}
-						else if (pid == 0)
+						
+						if (pipe_flag)
 						{
-							signal(SIGINT, SIG_DFL);
-							signal(SIGTSTP, SIG_DFL);
-							
-							if (background_flag)
+							int file_descs[2];
+							if (pipe(file_descs) == -1)
 							{
-								close(STDOUT_FILENO);
-								close(STDERR_FILENO);
+								perror("pipe error");
 							}
 							
-							execute_command(cmd_param);
-							
-							printf("dragonshell: %s: command not found\n", cmd_param[0]);
-							
-							return 1;
-						}
-						else
-						{
-							if (background_flag)
+							pid_t cpid = fork();
+							if (cpid == -1)
 							{
-								background_cpid = pid;
-								printf("PID %d is running in the background\n", background_cpid);
+								perror("fork error");
+							}
+							else if (cpid == 0)
+							{
+								close(file_descs[0]);
+								
+								if (!redirect_flag)
+								{
+									dup2(file_descs[1], STDOUT_FILENO);
+									close(file_descs[1]);
+								}
+								
+								execute_command(cmd_param);
+								
+								if (!redirect_flag)
+								{
+									fflush(stdout);
+									dup2(stdout_desc, STDOUT_FILENO);
+									close(stdout_desc);
+								}
 							}
 							else
 							{
-								foreground_cpid = pid;
-								waitpid(foreground_cpid, NULL, 0);
+								close(file_descs[1]);
+								dup2(file_descs[0], STDIN_FILENO);
+								close(file_descs[0]);
+								
+								if (pipe_param[1] != NULL)
+								{
+									cmd_str = pipe_param[1];
+									
+									redirect_flag = search_command(cmd_str, '>');
+									if (redirect_flag)
+									{
+										initiate_redirection(cmd_str);
+									}
+									
+									char *cmd2_param[TOKEN_MAX_NUM] = {NULL};
+									tokenize(cmd_str, " \t", cmd2_param);
+									
+									execute_command(cmd2_param);
+								}
 							}
 						}
+						else
+						{
+							execute_command(cmd_param);
+						}
+						
+						printf("dragonshell: %s: command not found\n", cmd_param[0]);
+						
+						_exit(1);
 					}
+					else
+					{
+						if (background_flag)
+						{
+							background_cpid = pid;
+							printf("PID %d is running in the background\n", background_cpid);
+						}
+						else
+						{
+							foreground_cpid = pid;
+							waitpid(foreground_cpid, NULL, 0);
+							foreground_cpid = -1;
+						}
+					}
+				}
+				
+				if (redirect_flag)
+				{
+					fflush(stdout);
+					dup2(stdout_desc, STDOUT_FILENO);
+					close(stdout_desc);
 				}
             }
         }
