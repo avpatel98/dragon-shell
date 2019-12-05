@@ -100,3 +100,8 @@ some other test cases that were used:
 * sleep 50 * ; sleep 10 ^C
 * ls -l -a -F | sort ; find ./ -name "\*.c" > result.out ; ls -lFa
 * a2path
+
+## Sources
+
+The lecture notes, the lab slides, the man pages and the TAs' guidance were used
+to complete this assignment.
